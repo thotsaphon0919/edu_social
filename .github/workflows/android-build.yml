@@ -1,0 +1,107 @@
+name: Android - Generate & Build (Lightweight APK)
+
+# วิธีใช้:
+# ไปที่แท็บ Actions -> เลือก workflow "Android - Generate & Build (Lightweight APK)" -> Run workflow
+# (หรือปล่อยให้รันอัตโนมัติทุกครั้งที่ push เข้า main)
+#
+# ครั้งแรกจะสร้างโฟลเดอร์ android/ ด้วย Flutter จริง แล้ว commit กลับเข้า repo อัตโนมัติ
+# APK ที่ได้จะถูก "แยกไฟล์ตาม CPU" (split-per-abi) แทนที่จะรวมทุกสถาปัตยกรรมไว้ไฟล์เดียว
+# (universal APK) ทำให้ไฟล์เล็กลงมาก (ปกติเล็กลง 2-3 เท่า) กินพื้นที่และแรมตอนติดตั้ง/รัน
+# น้อยกว่า เหมาะกับมือถือรุ่นเก่า/แรมน้อย พร้อมเปิด R8/ProGuard ย่อโค้ดและตัดทรัพยากร
+# ที่ไม่ได้ใช้ทิ้ง (shrinkResources) เพื่อลดขนาดและการใช้หน่วยความจำเพิ่มเติม
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate android/ platform files (only if missing)
+        run: |
+          if [ ! -d "android" ]; then
+            echo "ไม่พบโฟลเดอร์ android/ กำลังสร้างด้วย flutter create ..."
+            flutter create --platforms=android --project-name edu_social --org com.edusocial .
+          else
+            echo "พบโฟลเดอร์ android/ อยู่แล้ว ข้ามการสร้างใหม่"
+          fi
+
+      # จำกัดหน่วยความจำที่ Gradle daemon ใช้ระหว่าง build (ป้องกัน build ล้มเหลว
+      # บนเครื่อง/รันเนอร์ที่แรมน้อย) และปิด parallel build เพื่อลดการใช้แรมพร้อมกัน
+      - name: Configure Gradle for low-memory build
+        run: |
+          PROPS="android/gradle.properties"
+          touch "$PROPS"
+          grep -q "org.gradle.jvmargs" "$PROPS" \
+            && sed -i "s/org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx1536M -XX:+UseParallelGC/" "$PROPS" \
+            || echo "org.gradle.jvmargs=-Xmx1536M -XX:+UseParallelGC" >> "$PROPS"
+          grep -q "org.gradle.parallel" "$PROPS" || echo "org.gradle.parallel=false" >> "$PROPS"
+          grep -q "org.gradle.daemon" "$PROPS" || echo "org.gradle.daemon=false" >> "$PROPS"
+
+      # เปิดการย่อโค้ด (R8) และตัดทรัพยากรที่ไม่ได้ใช้ทิ้งสำหรับ release build
+      # เพื่อให้ APK เล็กลงและใช้หน่วยความจำน้อยลงตอนรันบนเครื่อง
+      - name: Enable code shrinking in release build
+        run: |
+          BUILD_GRADLE="android/app/build.gradle.kts"
+          if [ -f "$BUILD_GRADLE" ] && ! grep -q "isMinifyEnabled" "$BUILD_GRADLE"; then
+            python3 - "$BUILD_GRADLE" << 'EOF'
+          import sys
+          path = sys.argv[1]
+          with open(path) as f:
+              content = f.read()
+          old = "getByName(\"release\") {"
+          new = "getByName(\"release\") {\n            isMinifyEnabled = true\n            isShrinkResources = true"
+          if old in content and "isMinifyEnabled" not in content:
+              content = content.replace(old, new, 1)
+              with open(path, "w") as f:
+                  f.write(content)
+          EOF
+          fi
+
+      - name: Commit generated android/ files back to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add android
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: generate Android platform files + low-RAM build config (automated)"
+            git push
+          else
+            echo "ไม่มีการเปลี่ยนแปลงใน android/ ที่ต้อง commit"
+          fi
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # split-per-abi: สร้าง APK แยกไฟล์ตามสถาปัตยกรรม CPU (arm64-v8a, armeabi-v7a, x86_64)
+      # แทนที่จะรวมทุกสถาปัตยกรรมไว้ไฟล์เดียว (universal APK ที่ใหญ่กว่ามาก)
+      # มือถือแรมน้อย/รุ่นเก่าเกือบทั้งหมดเป็น arm64-v8a หรือ armeabi-v7a
+      - name: Build split APKs (lightweight, per CPU architecture)
+        run: flutter build apk --release --split-per-abi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apks-split
+          path: build/app/outputs/flutter-apk/*.apk

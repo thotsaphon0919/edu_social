@@ -6,7 +6,7 @@ name: iOS - Generate & Build
 #    (หรือปล่อยให้รันอัตโนมัติทุกครั้งที่ push เข้า main)
 # 3) ครั้งแรกที่รัน workflow จะสร้างโฟลเดอร์ ios/ ด้วย Flutter จริงบน macOS runner
 #    แล้ว commit กลับเข้า repo ให้อัตโนมัติ ครั้งต่อไปจะข้ามขั้นตอนนี้เพราะมี ios/ อยู่แล้ว
-# 4) ไฟล์ .app ที่ build ได้ (สำหรับ Simulator) จะถูกแนบเป็น Artifact ให้ดาวน์โหลดจากหน้า run
+# 4) ไฟล์ .app ที่ build ได้ (unsigned) จะถูกแนบเป็น Artifact ให้ดาวน์โหลดจากหน้า run
 
 on:
   push:
@@ -79,7 +79,7 @@ jobs:
         run: flutter pub get
 
       - name: Build iOS for Simulator (no code signing needed)
-        run: flutter build ios --simulator --release
+        run: flutter build ios --simulator --debug
 
       - name: Zip built app for download
         run: |

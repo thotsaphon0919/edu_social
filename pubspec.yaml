@@ -38,10 +38,6 @@ dependencies:
   firebase_messaging: any
   flutter_local_notifications: any
 
-  # Push Notification
-  firebase_messaging: any
-  flutter_local_notifications: any
-
   # Utils
   intl: ^0.19.0
   uuid: ^4.4.2

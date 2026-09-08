@@ -6,7 +6,7 @@ name: iOS - Generate & Build
 #    (หรือปล่อยให้รันอัตโนมัติทุกครั้งที่ push เข้า main)
 # 3) ครั้งแรกที่รัน workflow จะสร้างโฟลเดอร์ ios/ ด้วย Flutter จริงบน macOS runner
 #    แล้ว commit กลับเข้า repo ให้อัตโนมัติ ครั้งต่อไปจะข้ามขั้นตอนนี้เพราะมี ios/ อยู่แล้ว
-# 4) ไฟล์ .app ที่ build ได้ (unsigned) จะถูกแนบเป็น Artifact ให้ดาวน์โหลดจากหน้า run
+# 4) ไฟล์ .app ที่ build ได้ (สำหรับ Simulator) จะถูกแนบเป็น Artifact ให้ดาวน์โหลดจากหน้า run
 
 on:
   push:
@@ -78,16 +78,16 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build iOS (unsigned, for verification/simulator)
-        run: flutter build ios --release --no-codesign
+      - name: Build iOS for Simulator (no code signing needed)
+        run: flutter build ios --simulator --release
 
       - name: Zip built app for download
         run: |
-          cd build/ios/iphoneos
-          zip -r Runner-unsigned.zip Runner.app
+          cd build/ios/iphonesimulator
+          zip -r Runner-simulator.zip Runner.app
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ios-app-unsigned
-          path: build/ios/iphoneos/Runner-unsigned.zip
+          name: ios-app-simulator
+          path: build/ios/iphonesimulator/Runner-simulator.zip

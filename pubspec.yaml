@@ -1,0 +1,57 @@
+name: edu_social
+description: Student-Teacher social learning app (Feed + Chat + Call)
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+
+  # Firebase
+  # หมายเหตุ: ไม่ล็อกเวอร์ชันตายตัว เพราะแพ็กเกจ Firebase อัปเดตบ่อยและต้องใช้
+  # เวอร์ชันที่ "เข้าคู่กัน" เท่านั้น (mutually compatible) ปล่อยให้ pub
+  # resolver เลือกชุดล่าสุดที่เข้ากันได้เองจะปลอดภัยกว่าการ pin เวอร์ชันเก่า
+  firebase_core: any
+  firebase_auth: any
+  cloud_firestore: any
+  firebase_storage: any
+
+  # State management
+  provider: ^6.1.2
+
+  # Media
+  image_picker: ^1.1.2
+  file_picker: ^8.0.6
+  cached_network_image: any
+
+  # Voice / Video call
+  # หมายเหตุ: ใช้ any เพื่อดึงเวอร์ชันล่าสุดที่ build ด้วย compileSdk ใหม่
+  # (เวอร์ชันเก่ากว่านี้มีปัญหา AAR metadata ชนกับ androidx รุ่นใหม่)
+  agora_rtc_engine: any
+  permission_handler: ^11.3.1
+
+  # Push Notification
+  firebase_messaging: any
+  flutter_local_notifications: any
+
+  # Push Notification
+  firebase_messaging: any
+  flutter_local_notifications: any
+
+  # Utils
+  intl: ^0.19.0
+  uuid: ^4.4.2
+  timeago: ^3.7.0
+  google_fonts: ^6.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

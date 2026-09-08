@@ -1,0 +1,87 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() && request.auth.uid == userId;
+      // isVerifiedTeacher ควรแก้ไขได้เฉพาะผ่าน Admin SDK/Cloud Function เท่านั้น
+      // (เพิ่ม custom claim ตรวจสอบใน production)
+    }
+
+    match /posts/{postId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
+
+      // ผู้ใช้ที่ login แล้วแก้ไข field ไหนของโพสต์ใครก็ได้ตามเดิม (ช่องโหว่)
+      // เปลี่ยนเป็นอนุญาตเฉพาะ 3 กรณีที่แอปทำจริง: toggle like, toggle save,
+      // เพิ่ม commentCount ตอนคอมเมนต์ (แต่ละกรณีต้องแก้แค่ field ของตัวเอง
+      // และค่าที่เปลี่ยนต้องสมเหตุสมผลกับ action นั้นๆ) ส่วนเจ้าของโพสต์
+      // ยังแก้ไข/ลบเนื้อหาโพสต์ตัวเองได้ตามปกติ
+      function isLikeToggle() {
+        let uid = request.auth.uid;
+        let before = resource.data.likedBy;
+        let after = request.resource.data.likedBy;
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'likeCount']) &&
+          (
+            (!(uid in before) && (uid in after) &&
+              request.resource.data.likeCount == resource.data.likeCount + 1) ||
+            ((uid in before) && !(uid in after) &&
+              request.resource.data.likeCount == resource.data.likeCount - 1)
+          );
+      }
+
+      function isSaveToggle() {
+        let uid = request.auth.uid;
+        let before = resource.data.savedBy;
+        let after = request.resource.data.savedBy;
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['savedBy']) &&
+          ((!(uid in before) && (uid in after)) || ((uid in before) && !(uid in after)));
+      }
+
+      function isCommentCountIncrement() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount']) &&
+          request.resource.data.commentCount == resource.data.commentCount + 1;
+      }
+
+      allow update: if isSignedIn() && (
+        isLikeToggle() ||
+        isSaveToggle() ||
+        isCommentCountIncrement() ||
+        resource.data.authorId == request.auth.uid
+      );
+      allow delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
+      }
+    }
+
+    match /chats/{chatId} {
+      allow read, update: if isSignedIn() && request.auth.uid in resource.data.memberIds;
+      allow create: if isSignedIn() && request.auth.uid in request.resource.data.memberIds;
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+      }
+    }
+
+    match /availability/{slotId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.resource.data.teacherId == request.auth.uid;
+    }
+
+    match /call_requests/{reqId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.studentId == request.auth.uid;
+      allow update: if isSignedIn(); // teacher accept/reject
+    }
+  }
+}

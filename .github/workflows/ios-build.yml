@@ -1,12 +1,16 @@
-name: iOS - Generate & Build
+name: iOS - Build IPA
 
+# สร้างไฟล์ .ipa (unsigned) บน macOS runner ของ GitHub
+#
 # วิธีใช้:
-# 1) push โปรเจกต์นี้ขึ้น GitHub (ดูคำสั่ง git ที่แชตแนบให้)
-# 2) ไปที่แท็บ Actions ของ repo -> เลือก workflow "iOS - Generate & Build" -> Run workflow
-#    (หรือปล่อยให้รันอัตโนมัติทุกครั้งที่ push เข้า main)
-# 3) ครั้งแรกที่รัน workflow จะสร้างโฟลเดอร์ ios/ ด้วย Flutter จริงบน macOS runner
-#    แล้ว commit กลับเข้า repo ให้อัตโนมัติ ครั้งต่อไปจะข้ามขั้นตอนนี้เพราะมี ios/ อยู่แล้ว
-# 4) ไฟล์ .app ที่ build ได้ (unsigned) จะถูกแนบเป็น Artifact ให้ดาวน์โหลดจากหน้า run
+#   1) วางไฟล์นี้ทับ .github/workflows/ios-build.yml
+#   2) วางไฟล์ ios/Podfile (ที่แนบมาคู่กัน) ลงในโปรเจกต์
+#   3) push เข้า main หรือกด Run workflow เอง
+#   4) ดาวน์โหลด artifact ชื่อ "edu-social-ipa" จากหน้า run
+#
+# หมายเหตุ: .ipa ที่ได้ยัง "ไม่ได้เซ็น" (unsigned) ติดตั้งลงเครื่องจริงตรง ๆ ไม่ได้
+# ต้องเซ็นด้วย Sideloadly / AltStore / TrollStore หรือใส่ certificate จริง
+# (ดูหัวข้อ "โหมดเซ็นจริง" ที่คอมเมนต์ไว้ท้ายไฟล์)
 
 on:
   push:
@@ -14,15 +18,13 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  ios:
+  build-ipa:
     runs-on: macos-latest
-    permissions:
-      contents: write
+    timeout-minutes: 60
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -33,61 +35,91 @@ jobs:
       - name: Flutter doctor
         run: flutter doctor -v
 
-      - name: Generate ios/ platform files (only if missing)
-        run: |
-          if [ ! -d "ios" ]; then
-            echo "ไม่พบโฟลเดอร์ ios/ กำลังสร้างด้วย flutter create ..."
-            flutter create --platforms=ios --project-name edu_social --org com.edusocial .
-          else
-            echo "พบโฟลเดอร์ ios/ อยู่แล้ว ข้ามการสร้างใหม่"
-          fi
-
-      - name: Add required Info.plist permission strings
-        run: |
-          PLIST="ios/Runner/Info.plist"
-          add_key () {
-            KEY="$1"; VALUE="$2"
-            if ! /usr/libexec/PlistBuddy -c "Print :$KEY" "$PLIST" > /dev/null 2>&1; then
-              /usr/libexec/PlistBuddy -c "Add :$KEY string $VALUE" "$PLIST"
-            fi
-          }
-          add_key "NSCameraUsageDescription" "แอปต้องการใช้กล้องสำหรับวิดีโอคอลและถ่ายรูปโปรไฟล์/โพสต์"
-          add_key "NSMicrophoneUsageDescription" "แอปต้องการใช้ไมโครโฟนสำหรับการโทรด้วยเสียง/วิดีโอ"
-          add_key "NSPhotoLibraryUsageDescription" "แอปต้องการเข้าถึงรูปภาพเพื่ออัปโหลดโปรไฟล์และโพสต์"
-          add_key "NSPhotoLibraryAddUsageDescription" "แอปต้องการบันทึกรูปภาพลงในคลังภาพของคุณ"
-          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$PLIST" > /dev/null 2>&1 || true
-
-      - name: Set iOS deployment target to 13.0
-        run: |
-          if [ -f "ios/Podfile" ]; then
-            sed -i '' "s/# platform :ios, '.*'/platform :ios, '13.0'/" ios/Podfile || true
-          fi
-
-      - name: Commit generated ios/ files back to repo
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ios
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: generate iOS platform files (automated)"
-            git push
-          else
-            echo "ไม่มีการเปลี่ยนแปลงใน ios/ ที่ต้อง commit"
-          fi
-
-      - name: Install dependencies
+      - name: Install Dart/Flutter dependencies
         run: flutter pub get
 
-      - name: Build iOS for Simulator (no code signing needed)
-        run: flutter build ios --simulator --debug
+      # สร้าง Flutter/Generated.xcconfig + ดึง plugin ทั้งหมดมาไว้ให้ CocoaPods
+      # (ต้องทำก่อน pod install ไม่งั้น Podfile จะหา FLUTTER_ROOT ไม่เจอ)
+      - name: Generate iOS build config
+        run: flutter build ios --config-only --release --no-codesign
 
-      - name: Zip built app for download
+      - name: Install CocoaPods dependencies
+        working-directory: ios
         run: |
-          cd build/ios/iphonesimulator
-          zip -r Runner-simulator.zip Runner.app
+          pod repo update
+          pod install
 
-      - name: Upload build artifact
+      - name: Build iOS (release, unsigned)
+        run: flutter build ios --release --no-codesign --no-tree-shake-icons
+
+      # .ipa = ไฟล์ zip ที่มีโครงสร้าง Payload/<ชื่อแอป>.app ข้างใน
+      - name: Package Runner.app into .ipa
+        run: |
+          set -e
+          APP_PATH="build/ios/iphoneos/Runner.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::ไม่พบ $APP_PATH — build ไม่สำเร็จ"
+            exit 1
+          fi
+
+          mkdir -p build/ipa/Payload
+          cp -R "$APP_PATH" build/ipa/Payload/
+
+          # ลบลายเซ็นเปล่า ๆ ที่ Xcode ใส่มา เพื่อให้เครื่องมือ re-sign ทำงานง่ายขึ้น
+          rm -rf build/ipa/Payload/Runner.app/_CodeSignature
+
+          cd build/ipa
+          zip -qry "edu_social-unsigned.ipa" Payload
+          rm -rf Payload
+
+          echo "สร้าง .ipa เสร็จแล้ว:"
+          ls -lh edu_social-unsigned.ipa
+
+      - name: Upload .ipa artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ios-app-simulator
-          path: build/ios/iphonesimulator/Runner-simulator.zip
+          name: edu-social-ipa
+          path: build/ipa/edu_social-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+# ────────────────────────────────────────────────────────────────────────
+# โหมดเซ็นจริง (ต้องมี Apple Developer Program — ปีละ 99 USD)
+#
+# เพิ่ม secrets ใน repo (Settings → Secrets and variables → Actions):
+#   BUILD_CERTIFICATE_BASE64   คือ .p12 ที่ base64 แล้ว
+#   P12_PASSWORD               รหัสผ่านของ .p12
+#   PROVISIONING_PROFILE_BASE64
+#   KEYCHAIN_PASSWORD          ตั้งอะไรก็ได้
+#   APPLE_TEAM_ID
+#
+# แล้วแทน 3 step ตั้งแต่ "Build iOS (release, unsigned)" ด้วย:
+#
+#   - name: Import signing certificate
+#     env:
+#       CERT: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+#       P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+#       PROFILE: ${{ secrets.PROVISIONING_PROFILE_BASE64 }}
+#       KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+#     run: |
+#       echo -n "$CERT" | base64 --decode -o cert.p12
+#       echo -n "$PROFILE" | base64 --decode -o profile.mobileprovision
+#       security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+#       security set-keychain-settings -lut 21600 build.keychain
+#       security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+#       security import cert.p12 -k build.keychain -P "$P12_PASSWORD" -A \
+#         -t cert -f pkcs12
+#       security list-keychain -d user -s build.keychain
+#       mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+#       cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+#
+#   - name: Build signed IPA
+#     run: |
+#       flutter build ipa --release \
+#         --export-options-plist=ios/ExportOptions.plist
+#
+#   - uses: actions/upload-artifact@v4
+#     with:
+#       name: edu-social-ipa-signed
+#       path: build/ios/ipa/*.ipa
+# ────────────────────────────────────────────────────────────────────────

@@ -94,6 +94,22 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # บั๊กที่รู้กันในตัวแพ็กเกจ agora_rtc_engine (GitHub issue #2498): ตัวแพ็กเกจเอง
+      # ถูก build ด้วย compileSdkVersion=31 แต่พ่วง androidx library ที่ต้องการ 34+
+      # ไว้ข้างใน ทำให้ Gradle ปฏิเสธ build ("checkReleaseAarMetadata" fail)
+      # แก้โดยแพตช์ compileSdkVersion ในไฟล์ build.gradle ของแพ็กเกจนี้โดยตรง
+      # (อยู่ใน pub cache หลัง flutter pub get) ให้สูงขึ้นก่อน build
+      - name: Patch agora_rtc_engine compileSdkVersion (known upstream bug #2498)
+        run: |
+          AGORA_DIR=$(find "$HOME/.pub-cache/hosted/pub.dev" -maxdepth 1 -iname "agora_rtc_engine-*" -print -quit)
+          if [ -n "$AGORA_DIR" ] && [ -f "$AGORA_DIR/android/build.gradle" ]; then
+            echo "พบแพ็กเกจที่: $AGORA_DIR"
+            sed -i -E 's/compileSdkVersion[[:space:]]+[0-9]+/compileSdkVersion 36/' "$AGORA_DIR/android/build.gradle"
+            grep -n "compileSdkVersion" "$AGORA_DIR/android/build.gradle" || true
+          else
+            echo "ไม่พบไฟล์ build.gradle ของ agora_rtc_engine (ข้ามขั้นตอนนี้)"
+          fi
+
       # split-per-abi: สร้าง APK แยกไฟล์ตามสถาปัตยกรรม CPU (arm64-v8a, armeabi-v7a, x86_64)
       # แทนที่จะรวมทุกสถาปัตยกรรมไว้ไฟล์เดียว (universal APK ที่ใหญ่กว่ามาก)
       # มือถือแรมน้อย/รุ่นเก่าเกือบทั้งหมดเป็น arm64-v8a หรือ armeabi-v7a

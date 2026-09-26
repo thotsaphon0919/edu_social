@@ -1,0 +1,125 @@
+name: iOS - Build IPA
+
+# สร้างไฟล์ .ipa (unsigned) บน macOS runner ของ GitHub
+#
+# วิธีใช้:
+#   1) วางไฟล์นี้ทับ .github/workflows/ios-build.yml
+#   2) วางไฟล์ ios/Podfile (ที่แนบมาคู่กัน) ลงในโปรเจกต์
+#   3) push เข้า main หรือกด Run workflow เอง
+#   4) ดาวน์โหลด artifact ชื่อ "edu-social-ipa" จากหน้า run
+#
+# หมายเหตุ: .ipa ที่ได้ยัง "ไม่ได้เซ็น" (unsigned) ติดตั้งลงเครื่องจริงตรง ๆ ไม่ได้
+# ต้องเซ็นด้วย Sideloadly / AltStore / TrollStore หรือใส่ certificate จริง
+# (ดูหัวข้อ "โหมดเซ็นจริง" ที่คอมเมนต์ไว้ท้ายไฟล์)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build-ipa:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      - name: Install Dart/Flutter dependencies
+        run: flutter pub get
+
+      # สร้าง Flutter/Generated.xcconfig + ดึง plugin ทั้งหมดมาไว้ให้ CocoaPods
+      # (ต้องทำก่อน pod install ไม่งั้น Podfile จะหา FLUTTER_ROOT ไม่เจอ)
+      - name: Generate iOS build config
+        run: flutter build ios --config-only --release --no-codesign
+
+      - name: Install CocoaPods dependencies
+        working-directory: ios
+        run: |
+          pod repo update
+          pod install
+
+      - name: Build iOS (release, unsigned)
+        run: flutter build ios --release --no-codesign --no-tree-shake-icons
+
+      # .ipa = ไฟล์ zip ที่มีโครงสร้าง Payload/<ชื่อแอป>.app ข้างใน
+      - name: Package Runner.app into .ipa
+        run: |
+          set -e
+          APP_PATH="build/ios/iphoneos/Runner.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::ไม่พบ $APP_PATH — build ไม่สำเร็จ"
+            exit 1
+          fi
+
+          mkdir -p build/ipa/Payload
+          cp -R "$APP_PATH" build/ipa/Payload/
+
+          # ลบลายเซ็นเปล่า ๆ ที่ Xcode ใส่มา เพื่อให้เครื่องมือ re-sign ทำงานง่ายขึ้น
+          rm -rf build/ipa/Payload/Runner.app/_CodeSignature
+
+          cd build/ipa
+          zip -qry "edu_social-unsigned.ipa" Payload
+          rm -rf Payload
+
+          echo "สร้าง .ipa เสร็จแล้ว:"
+          ls -lh edu_social-unsigned.ipa
+
+      - name: Upload .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: edu-social-ipa
+          path: build/ipa/edu_social-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+# ────────────────────────────────────────────────────────────────────────
+# โหมดเซ็นจริง (ต้องมี Apple Developer Program — ปีละ 99 USD)
+#
+# เพิ่ม secrets ใน repo (Settings → Secrets and variables → Actions):
+#   BUILD_CERTIFICATE_BASE64   คือ .p12 ที่ base64 แล้ว
+#   P12_PASSWORD               รหัสผ่านของ .p12
+#   PROVISIONING_PROFILE_BASE64
+#   KEYCHAIN_PASSWORD          ตั้งอะไรก็ได้
+#   APPLE_TEAM_ID
+#
+# แล้วแทน 3 step ตั้งแต่ "Build iOS (release, unsigned)" ด้วย:
+#
+#   - name: Import signing certificate
+#     env:
+#       CERT: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+#       P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+#       PROFILE: ${{ secrets.PROVISIONING_PROFILE_BASE64 }}
+#       KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+#     run: |
+#       echo -n "$CERT" | base64 --decode -o cert.p12
+#       echo -n "$PROFILE" | base64 --decode -o profile.mobileprovision
+#       security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+#       security set-keychain-settings -lut 21600 build.keychain
+#       security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+#       security import cert.p12 -k build.keychain -P "$P12_PASSWORD" -A \
+#         -t cert -f pkcs12
+#       security list-keychain -d user -s build.keychain
+#       mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+#       cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+#
+#   - name: Build signed IPA
+#     run: |
+#       flutter build ipa --release \
+#         --export-options-plist=ios/ExportOptions.plist
+#
+#   - uses: actions/upload-artifact@v4
+#     with:
+#       name: edu-social-ipa-signed
+#       path: build/ios/ipa/*.ipa
+# ────────────────────────────────────────────────────────────────────────

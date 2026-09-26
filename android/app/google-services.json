@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "836249487201",
+    "project_id": "edu--social",
+    "storage_bucket": "edu--social.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:836249487201:android:0c8e61034e31986c5be720",
+        "android_client_info": {
+          "package_name": "com.edusocial.edu_social"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDn3Pod6hWi22rGRXJL8NDSO6QnuizNxZM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:836249487201:android:4c98eb34c96904dc5be720",
+        "android_client_info": {
+          "package_name": "com.example.edu_social"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDn3Pod6hWi22rGRXJL8NDSO6QnuizNxZM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
